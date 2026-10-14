@@ -1,0 +1,55 @@
+## 读前准备
+
+@@ overview | 一页速览：这篇论文在做什么 | p.1
+直: 想象钱包掉进沙发和地板之间的窄缝：你看不见它，手也伸不进去，只能拿一根尺子伸进去，**凭手上的感觉**一点点把它拨出来。这篇论文让机械臂做同一件事：拿一根尖端贴了触觉传感器的"探棒"，只靠触觉把窄缝里的物体往外推。
+原: [p.1] Specifically, a tactile-sensorized tool stick that well fits in the narrow space is utilized to provide multi-point contact sensing for object manipulation. A reinforcement learning (RL) agent with a hybrid action space is then proposed to acquire the optimal policy for manipulating the objects without prior knowledge of their physical properties.
+图: figs/fig1.webp | **Fig.1** 机器人用探棒在窄缝里取钱包。探棒尖端贴着磁式触觉传感器，测量接触信息。[p.1]
+重: 作者自己列的三个贡献 [p.2]：
+- **只用触觉的强化学习规划器**：输入触觉，输出动作，动作里有一个"带参数的动作原语"（后面会讲）
+- **省时的训练方式**：只用标准长方体和圆柱体训练，却能推广到没见过的日常物体
+- **终点目标的课程**：先定一个容易的目标，做到了再慢慢加难度，进一步缩短真机训练时间
+数: 测试集 12 个没见过的物体：本文方法成功率 **90%**，启发式基线 **55%** [Table II, p.6]。真机训练总时长约 **5 小时** [p.5]。
+讲: **建议阅读顺序**（7 页，第 7 页只有参考文献）：
+- 第一遍（10 分钟）：本节 → 「结果：Table II」→「结论」
+- 第二遍（40 分钟）：方法部分的观测、动作、奖励、训练四节，配合交互演示
+- 第三遍：实验设置、消融、局限，最后做自测
+
+@@ prereq | 读前需要的几个概念 | p.1-2
+直: 这篇论文用到的概念不多，下面每个都先给直观意思。
+术: **强化学习（Reinforcement Learning, RL）**：机器人不断试，每一步拿到一个分数（奖励），慢慢学会"在什么情况下做什么动作"能拿高分。学到的"情况 → 动作"规则叫**策略（policy）**，每一步看到的信息叫**观测（observation）**。
+
+**回合（episode）/ 时间步（timestep）**：从开始推一个物体到成功或失败算一个回合；回合里每做一次动作算一个时间步。
+
+**SAC（Soft Actor-Critic）**：一种常用的强化学习算法。"actor"网络负责出动作，"critic"网络负责给动作打分。它是 **off-policy（离策略）** 的：过去所有试过的经验都存进**经验回放（replay buffer）**，训练时随便抽，所以很省数据。常见的 PPO 是 on-policy 的，只能用当前策略刚收集的数据。
+
+**动作原语（action primitive）**：一段事先写好的固定动作，比如"先离开、后退、再贴回去"。**带参数**的原语是指这段动作里有个数（比如后退多远）由网络决定。
+
+**课程学习（curriculum）**：像教小孩一样先易后难，做到了就加难度。
+
+**切向力（shear force）/ 法向力（normal force）**：法向力是"压"的力，垂直于传感器表面；切向力是"拖"的力，平行于表面。
+
+**FFT（快速傅里叶变换）**：把一段信号拆成不同频率的成分。物体打滑时力会快速抖动，高频成分就会变大。
+
+**启发式基线（heuristic baseline）**：人按经验写死规则的方法，用来和学习方法比较。**消融实验（ablation）**：去掉方法里的某个部件，看效果差多少，证明这个部件有用。
+
+## 问题与动机
+
+@@ problem | 问题：为什么要"拿棍子摸着取东西" | p.1-2
+原: [p.1] Methods relying on visual perception like RGB-D cameras or motion capture systems [14]–[16] are not practical for such tasks because of occlusion caused by the confined space. Furthermore, spatial constraints may prohibit the use of conventional grippers.
+讲: 作者要解决的场景有三个难点，每个难点逼出一个设计选择：
+| 难点 | 后果 | 本文的选择
+| 窄缝里相机被遮挡 | 不能靠视觉 | **只用触觉**做观测
+| 夹爪伸不进去 | 不能抓 | 用细长**探棒**去拨、去推（非抓取操作）
+| 物体形状、重量、摩擦都未知 | 没法建立精确的物理模型 | 用**强化学习**直接从触觉数据学策略
+原: [p.2] Notably, as each tactile sensor has complex physical properties and the objects of interest are not limited to rigid ones, realistic modeling of the sensor and objects for simulation-based training becomes challenging, which encourages direct on-hardware training for the RL agent.
+讲: 强化学习一般先在仿真里练。但触觉传感器和软物体都很难仿真得像，作者干脆**直接在真机上训练**。真机训练又慢又磨损硬件 [p.2]，所以论文后半部分的很多设计（只练两类形状、混合动作、终点课程）都是为了**把真机训练时间压下来**。读方法时带着这个问题："这个设计是怎么省训练时间的？"
+重: 作者明确假设**物体已经找到了**，"搜索物体"不在本文范围内 [p.3]。
+
+@@ related | 相关工作：本文站在哪里 | p.2
+讲: 作者把相关工作分成三类，每类指出一个不足，对应本文的一个设计：
+| 已有工作 | 不足（作者的说法） | 本文的对应设计
+| 触觉操作，但假设物体完全已知（如 [10] 假设摩擦系数已知、[12] 需要完整物体属性） | 换个日常物体就不适用 | 不建模，用强化学习从交互里学
+| 动作原语：[17] 只有离散的固定方向动作；[18] 只从人设计的原语库里选 | 缺少参数化，或者人为设计带来偏差 | 连续动作 + **一个**带参数的原语
+| 课程学习：[19] 在插孔任务上用难度课程；[20][21] 在仿真里对目标做课程 | 都在仿真或别的任务里 | 把终点目标课程用到**真机训练**
+原: [p.2] As such, we believe that a combination of generic continuous actions and parameterized action primitives shall minimize bias introduced by primitives and grant the agent greater freedom to explore better policies.
+联: [17] 和 [6] 的作者里也有 Wenyu Liang 和 Yan Wu，[3] 的作者里也有 Yan Wu，可以看出这是同一个组持续在做的触觉操作方向。想了解组里的历史工作，可以从这几篇开始。

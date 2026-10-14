@@ -1,0 +1,44 @@
+<h4>交互：一步的奖励怎么算出来<span class="badge">参数来自 Table I；时间惩罚未模拟原语的等效步数</span></h4>
+<div class="ctrl">
+  <label>本步最大法向力 <output id="rwFO"></output><input type="range" id="rwF" min="0" max="250" value="80"></label>
+  <label>本步物体前进 d<sub>o</sub> <output id="rwDO"></output><input type="range" id="rwD" min="-20" max="40" value="4"></label>
+  <label>课程进度：已成功次数 <output id="rwKO"></output><input type="range" id="rwK" min="0" max="40" value="5"></label>
+</div>
+<div class="ctrl"><button type="button" id="rwGoal">本步达成终点目标</button><button type="button" id="rwPf">后退原语失败</button></div>
+<canvas id="rwCv" height="210" aria-label="各奖励项柱状图"></canvas>
+<pre class="out" id="rwOut"></pre>
+<div class="note">柱子向上是加分、向下是扣分。试试把法向力拉过 1.5 N；或者把课程进度分别放在 0 和 30，再点「达成终点目标」，比较终点奖励。d<sub>o</sub> 的单位按 mm 理解（原文的门槛都用 mm，但没有写 d<sub>o</sub> 的单位）。</div>
+<script>
+(function(){
+  const {$, css, fit, onRedraw} = R;
+  const c = $('#rwCv'); let goal = false, pfail = false;
+  const rt = -0.1, aro = 5.0, fnl = 0.2, fnh = 1.5, rfh = -10, arg = 2.0, rp = -10, dgl = 20, dgh = 50;
+  function draw(){
+    const f = +$('#rwF').value / 100, d = +$('#rwD').value / 10, k = +$('#rwK').value, dg = Math.min(dgl + k, dgh);
+    const r_f = f < fnl ? 0 : f > fnh ? rfh : (f - fnl) ** 2;
+    const parts = [['r_t 时间', rt], ['r_o 推进', aro * d], ['r_f 力', r_f], ['r_g 终点', goal ? arg * dg : 0], ['r_p 原语', pfail ? rp : 0]];
+    const tot = parts.reduce((s, p) => s + p[1], 0);
+    $('#rwFO').textContent = f.toFixed(2) + ' N' + (f < fnl ? '（低于 0.2 N）' : f > fnh ? '（超过 1.5 N：扣分并松开）' : '');
+    $('#rwDO').textContent = d.toFixed(1) + ' mm';
+    $('#rwKO').textContent = k + ' 次 → 当前门槛 d_g = ' + dg + ' mm';
+    const {x, w, h} = fit(c);
+    const vmax = Math.max(20, ...parts.map(p => Math.abs(p[1])), Math.abs(tot));
+    const base = h / 2, bw = Math.min(70, (w - 40) / 7), gap = (w - 6 * bw) / 7;
+    x.strokeStyle = css('--line'); x.beginPath(); x.moveTo(10, base); x.lineTo(w - 10, base); x.stroke();
+    x.font = '12px -apple-system,sans-serif';
+    [...parts, ['总奖励 r', tot]].forEach((p, i) => {
+      const X = gap + i * (bw + gap), v = p[1], H = v / vmax * (h / 2 - 28);
+      x.fillStyle = i === 5 ? css('--ink') : v >= 0 ? css('--s3') : css('--s4');
+      x.fillRect(X, v >= 0 ? base - H : base, bw, Math.max(1, Math.abs(H)));
+      x.fillStyle = css('--ink2'); x.textAlign = 'center';
+      x.fillText(p[0], X + bw / 2, h - 6); x.fillText(v.toFixed(2), X + bw / 2, v >= 0 ? base - H - 6 : base - H + 14);
+      x.textAlign = 'start';
+    });
+    $('#rwOut').textContent = `r = ${parts.map(p => p[1].toFixed(2)).join(' + ')} = ${tot.toFixed(2)}`;
+  }
+  ['#rwF', '#rwD', '#rwK'].forEach(id => $(id).addEventListener('input', draw));
+  $('#rwGoal').addEventListener('click', e => { goal = !goal; e.target.classList.toggle('on', goal); draw(); });
+  $('#rwPf').addEventListener('click', e => { pfail = !pfail; e.target.classList.toggle('on', pfail); draw(); });
+  onRedraw(draw);
+})();
+</script>

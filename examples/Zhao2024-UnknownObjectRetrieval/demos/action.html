@@ -1,0 +1,42 @@
+<h4>交互：3 维动作怎么变成机械臂的移动<span class="badge">缩放系数来自原文 p.4；图形为示意</span></h4>
+<canvas id="actCv" height="250" aria-label="动作示意（俯视）"></canvas>
+<div class="ctrl">
+  <label>a<sub>x</sub>（取物方向）<output id="actAxO"></output><input type="range" id="actAx" min="-100" max="100" value="70"></label>
+  <label>a<sub>y</sub>（横向）<output id="actAyO"></output><input type="range" id="actAy" min="-100" max="100" value="-20"></label>
+  <label>a<sub>p</sub>（后退原语）<output id="actApO"></output><input type="range" id="actAp" min="-100" max="100" value="-40"></label>
+</div>
+<pre class="out" id="actOut"></pre>
+<div class="note">网络输出的三个数都在 [−1, 1] 之间。把 a<sub>p</sub> 拉过 0，看机器人怎样放弃前两个数，改为执行固定的三步后退调整。</div>
+<script>
+(function(){
+  const {$, css, hexA, fit, arrow, onRedraw} = R;
+  const c = $('#actCv');
+  function draw(){
+    const {x, w, h} = fit(c);
+    const ax = +$('#actAx').value / 100, ay = +$('#actAy').value / 100, ap = +$('#actAp').value / 100;
+    $('#actAxO').textContent = ax.toFixed(2); $('#actAyO').textContent = ay.toFixed(2); $('#actApO').textContent = ap.toFixed(2);
+    const ox = w / 2, oy = h * 0.3, R0 = Math.min(42, w * 0.08);
+    x.fillStyle = hexA(css('--s2'), 0.25); x.strokeStyle = css('--s2'); x.lineWidth = 1.5; x.beginPath(); x.arc(ox, oy, R0, 0, 7); x.fill(); x.stroke();
+    x.fillStyle = css('--ink2'); x.font = '12px -apple-system,sans-serif'; x.fillText('物体（俯视）', ox - 34, oy - R0 - 8);
+    const tip = [ox, oy + R0 + 6];
+    x.fillStyle = css('--ink2'); x.fillRect(tip[0] - 5, tip[1], 10, h - tip[1] - 10);
+    x.fillStyle = css('--s3'); x.fillRect(tip[0] - 7, tip[1], 14, 6);
+    let txt;
+    if (ap <= 0) {
+      const dx = ay * 0.2, dy = ax * 0.5, scale = 60;
+      x.lineWidth = 2; arrow(x, tip[0], tip[1] + 20, tip[0] + dx * scale, tip[1] + 20 + dy * scale, css('--s1'), 6); x.lineWidth = 1;
+      x.fillStyle = css('--s1'); x.fillText('本步位移（放大 60 倍显示）', tip[0] + 14, tip[1] + 40);
+      txt = `a_p = ${ap.toFixed(2)} ≤ 0 → 正常移动\n取物方向 x：${ax.toFixed(2)} × 0.5 mm = ${(ax * 0.5).toFixed(2)} mm\n横向 y：${ay.toFixed(2)} × 0.2 mm = ${(ay * 0.2).toFixed(2)} mm`;
+    } else {
+      const d2 = ap * 30, s1 = 18, L2 = d2 * 3;
+      const p0 = [tip[0], tip[1] + 4], p1 = [p0[0] - s1 * 2.2, p0[1]], p2 = [p1[0], p1[1] + L2], p3 = [p2[0] + s1 * 2.2, p2[1]];
+      x.lineWidth = 2; arrow(x, ...p0, ...p1, css('--s1'), 5); arrow(x, ...p1, ...p2, css('--s1'), 5); arrow(x, ...p2, ...p3, css('--s1'), 5); x.lineWidth = 1;
+      x.fillStyle = css('--s1'); x.fillText('step-1 离开', p1[0] - 78, p1[1] + 4); x.fillText(`step-2 后退 ${d2.toFixed(1)} mm`, p1[0] - 118, (p1[1] + p2[1]) / 2); x.fillText('step-3 贴回', p3[0] + 8, p3[1] + 4);
+      txt = `a_p = ${ap.toFixed(2)} > 0 → 忽略 a_x、a_y，执行后退调整原语\nstep-2 距离 = ${ap.toFixed(2)} × 30 mm = ${d2.toFixed(1)} mm\n目的：物体滚开后重新建立接触；一段时间内没重新碰到物体，奖励 r_p = −10`;
+    }
+    $('#actOut').textContent = txt;
+  }
+  ['#actAx', '#actAy', '#actAp'].forEach(id => $(id).addEventListener('input', draw));
+  onRedraw(draw);
+})();
+</script>

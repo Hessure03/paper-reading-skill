@@ -1,0 +1,30 @@
+name: smoke-test
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            autostart: "yes"   # 没有 systemd 用户会话时应自动退回手动启动
+          - os: windows-latest
+            autostart: "yes"   # 启动文件夹 .cmd + 后台进程
+          - os: macos-latest
+            autostart: "no"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Smoke test
+        run: python tests/smoke_test.py "${{ runner.temp }}/pr" --autostart ${{ matrix.autostart }}
+        shell: bash

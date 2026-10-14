@@ -1,0 +1,76 @@
+## 方法
+
+@@ system | 系统：机械臂 + 探棒 + XELA 触觉阵列 | p.2-3
+图: figs/fig2.webp | **Fig.2** 系统框图：触觉读数 → 特征提取 → 强化学习规划器 → 动作 → 机械臂 → 环境。虚线表示奖励只在训练时使用。[p.3]
+讲: 整个系统是一个闭环，每个时间步走一圈：
+- **触觉传感器**测到力 → **特征提取**把 48 个读数压成 9 个数（观测 $s$）
+- **强化学习规划器**根据 $s$ 输出 3 维动作 $a$ → **机械臂**按动作移动探棒
+- 物体被推动，下一步的触觉读数随之变化
+- 训练时环境还会给一个奖励 $r$（虚线），测试时没有
+数: 硬件 [p.2–3]：
+- 机械臂：KUKA iiwa LBR 14 R820，7 自由度，位置伺服控制精度高
+- 探棒：3D 打印，长 20 cm
+- 触觉传感器：XELA Robotics 的 **uSPa44**，磁式、扁平，4×4 个触点（taxel），每个触点 3 个通道（1 个法向力 + 2 个切向力），已标定成力，采样 **100 Hz**
+原: [p.3] Different from vision-based tactile sensors, the XELA tactile sensor offers higher sampling and processing rates at 100 Hz, which better suits the problem of real-time feedback control. In addition, the XELA tactile sensor demonstrates strong resistance to impacts and constant wear and tear, which are frequently encountered challenges when training RL agents directly on hardware.
+讲: 这段是**为什么选阵列式（Xela 类）而不是 GelSight 类视触觉**的直接理由：采样快（适合实时反馈控制）、耐撞耐磨（真机强化学习要反复试错）。以后比较不同触觉传感器时，这段可以直接引用。
+勘: Fig.3 的图注写的是 "uSkin tactile sensor"，正文写的是 "uSPa44" [p.3]。两者不矛盾：uSkin 是 XELA 的产品系列名，uSPa44 是其中的 4×4 扁平型号。写对比表时记作"XELA uSkin（uSPa44）"。
+联: 软件实现 [p.4]：环境部分用 MATLAB 写，强化学习智能体用 Python 写（Stable-Baselines3），模块之间用 ROS 通信。
+
+@@ obs | 观测：机器人每一步"摸到"什么 | p.3
+直: 传感器每次给 16 个触点 × 3 个力 = 48 个数。作者没有把 48 个数都喂给网络，而是**按列压缩**：每一列只留最大的压力和最大的拖拽力，再加一个"有没有在打滑"的数，一共 9 个数。数越少，网络越好学，真机训练就越快。
+图: figs/fig3.webp | **Fig.3** 工作空间和坐标系（x = 取物方向，y = 横向），右边是 4×4 触觉阵列，虚线框是"列"。[p.3]
+式: s=[\mathbf f_{\mathrm n},\ \mathbf f_{\mathrm x},\ \mu_{\mathrm{FFT}}]\in\mathbb R^9,\qquad \mathbf f_{\mathrm n}=[f_{\mathrm n,1},\dots,f_{\mathrm n,4}],\quad \mathbf f_{\mathrm x}=[f_{\mathrm x,1},\dots,f_{\mathrm x,4}]
+讲: 三部分分别是 [p.3]：
+- $f_{\mathrm n,i}$：第 $i$ 列 4 个触点里**最大的法向力**
+- $f_{\mathrm x,i}$：第 $i$ 列里**绝对值最大的 x 方向切向力**（保留正负号，所以能看出拖的方向）
+- $\mu_{\mathrm{FFT}}$：取最近 32 个采样的 x 方向切向力做 FFT，**30 Hz 以上频率成分的平均值**。思路来自 [7]：打滑时力会高频抖动，这个数就会变大
+演: demos/obs.html
+坑: 注意 $y$ 方向的切向力没有进观测，只用了 x 方向（取物方向）的切向力。按列取最大值还丢掉了"接触点在列里的上下位置"。
+评: 按列压缩意味着策略主要能感知"物体压在探棒尖端的左边还是右边、压得多重、往哪拖"。这对水平推物够用，但如果以后要做更精细的任务（比如判断物体姿态），48 个原始读数或者把阵列当成图来处理，可能保留更多信息。这是一个值得继续追问的改进点。
+
+@@ action | 动作：连续位移 + 一个带参数的后退原语 | p.3-4
+直: 网络每一步输出 3 个数。前两个数是"探棒在水平面上往哪挪一小步"；第三个数是一个开关加旋钮：小于等于 0 时什么也不做，大于 0 时机器人放下前两个数，执行一套固定的"后退再贴回"动作，后退多远由这个数决定。
+式: a=[a_{\mathrm x},\ a_{\mathrm y},\ a_{\mathrm p}]\in\mathbb R^3
+讲: 三个分量 [p.3]：
+- $a_{\mathrm x}$：沿取物方向的位移；$a_{\mathrm y}$：垂直于取物方向的位移
+- $a_{\mathrm p}\le 0$：照 $a_{\mathrm x}, a_{\mathrm y}$ 移动
+- $a_{\mathrm p}>0$：忽略 $a_{\mathrm x}, a_{\mathrm y}$，执行**后退调整**（Fig.4 的 step-1 → step-2 → step-3），step-2 的距离由 $a_{\mathrm p}$ 决定
+图: figs/fig4.webp | **Fig.4** 后退调整原语（俯视）：离开物体 → 后退一段距离 → 重新贴上物体。step-2 的距离由 $a_{\mathrm p}$ 决定。[p.3]
+数: 网络输出都归一化到 $[-1,1]$，执行前乘缩放系数 [p.4]：$\alpha_{\mathrm{a,x}}=0.5$ mm，$\alpha_{\mathrm{a,y}}=0.2$ mm，$\alpha_{\mathrm{a,p}}=30$ mm。也就是说，一步最多前进 0.5 mm、横移 0.2 mm，后退调整最多 30 mm。
+演: demos/action.html
+讲: **为什么需要后退原语？** 圆柱这类物体会滚。探棒推着推着，物体滚开，接触就断了，这时需要"退回去、绕到物体另一侧重新贴上"。如果只用每步 0.5 mm 的小位移去凑这个动作，要连续几十步都做对，随机探索几乎碰不到，学不会。原语把这串动作打包成一步，网络只需要学"什么时候用、退多远"。消融实验证明去掉它，圆柱物体就学不会了 [p.6]。
+勘: 论文没有给出控制周期（一个时间步多长），所以无法从"每步最多 0.5 mm"换算出探棒的速度（mm/s）。
+
+@@ reward | 奖励：每一步怎么打分 | p.3-4
+式: r=r_{\mathrm t}+r_{\mathrm o}+r_{\mathrm f}+r_{\mathrm g}+r_{\mathrm p}\qquad(1)
+讲: 五项分别是 [p.3–4]：
+| 项 | 含义 | 公式 / 取值 | 类型
+| $r_{\mathrm t}$ | 时间惩罚，催它快点完成 | 每步 $-0.1$；用了原语时按"等效步数"计 | 持续
+| $r_{\mathrm o}$ | 物体往外移动了就加分 | $\alpha_{\mathrm{r,o}}d_{\mathrm o}$，$\alpha_{\mathrm{r,o}}=5.0$ | 持续
+| $r_{\mathrm f}$ | 调节按压力，不能太轻也不能太重 | 见式 (3) | 持续
+| $r_{\mathrm g}$ | 达成终点目标的大奖 | $\alpha_{\mathrm{r,g}}d_{\mathrm g}$，$\alpha_{\mathrm{r,g}}=2.0$ | 终点
+| $r_{\mathrm p}$ | 后退原语没能重新碰到物体 | $-10.0$ | 事件
+式: r_{\mathrm f}=\begin{cases}0 & f_{\mathrm n}^{\max}<f_{\mathrm n}^{\mathrm l}\\ r_{\mathrm f}^{\mathrm h} & f_{\mathrm n}^{\max}>f_{\mathrm n}^{\mathrm h}\\ (f_{\mathrm n}^{\max}-f_{\mathrm n}^{\mathrm l})^2 & \text{otherwise}\end{cases}\qquad(3)
+讲: $f_{\mathrm n}^{\max}$ 是整个阵列测到的最大法向力。$f_{\mathrm n}^{\mathrm l}=0.2$ N，$f_{\mathrm n}^{\mathrm h}=1.5$ N，$r_{\mathrm f}^{\mathrm h}=-10$ [Table I]。直观上：压得太轻（不到 0.2 N）不给分；在 0.2–1.5 N 之间，压得越实分越高（最多 $1.3^2=1.69$）；超过 1.5 N 扣 10 分，并且机器人会自动松开到 0.2 N [p.4]。
+原: [p.4] The threshold $f_n^l > 0$ is included to avoid the agent getting stuck at local minima and giving up interacting with the object.
+讲: 这句话的意思是：如果不给"保持接触"任何好处，智能体可能学到"干脆别碰物体，就不会因为压太重被扣分"这种偷懒策略（局部最优）。
+讲: **终点目标和课程** [p.4]：一个回合里物体累计前进超过 $d_{\mathrm g}$，就拿到终点奖励 $r_{\mathrm g}=2.0\,d_{\mathrm g}$。$d_{\mathrm g}$ 一开始是 $d_{\mathrm g}^{\mathrm l}=20$ mm，每成功一次加 1 mm，一直加到 $d_{\mathrm g}^{\mathrm h}=50$ mm。作者的比喻是"像小孩学走路，先迈小步，熟了再迈大步"。
+演: demos/reward.html
+数: **Table I 参数表** [p.4]
+| 变量 | 值 | 变量 | 值 | 变量 | 值
+| $r_{\mathrm t}$ | −0.1 | $r_{\mathrm f}^{\mathrm h}$ | −10.0 | $r_{\mathrm p}$ | −10.0
+| $f_{\mathrm n}^{\mathrm l}$ | 0.2 N | $f_{\mathrm n}^{\mathrm h}$ | 1.5 N | $d_{\mathrm g}^{\mathrm l}$ | 20.0 mm
+| $d_{\mathrm g}^{\mathrm h}$ | 50.0 mm | $\alpha_{\mathrm{r,o}}$ | 5.0 | $\alpha_{\mathrm{r,g}}$ | 2.0
+坑: $r_{\mathrm o}$ 里的物体位移 $d_{\mathrm o}$ 是用 **OptiTrack 动作捕捉**测的 [p.4]。也就是说训练时其实"看得见"物体，只是这个信息只用来打分，不进观测。测试时完全不用动捕，只靠触觉 [p.5]。
+评: 奖励依赖动捕，意味着这套训练方法离开实验室（没有动捕）就没法再训练或在线微调。如果想让机器人在真实环境里继续学习，需要换一种不依赖外部测量的奖励，比如从触觉或机械臂自身位置估计物体位移。
+
+@@ training | 训练：怎么在真机上 5 小时练成 | p.4-5
+数: SAC 算法（Stable-Baselines3 实现）；actor 和 critic 都是 2 个隐藏层、每层 256 个单元的全连接网络，ReLU 激活 [p.4]。
+讲: **分开练，再合并**（作者叫 focused training，聚焦训练）[p.4–5]：
+- 先用 4 个长方体（Obj-1～4）从零训练一个模型，约 **125 回合**收敛
+- 再从零训练另一个模型对付 4 个圆柱（Obj-5～8），约 **300 回合**收敛
+- 把两个模型各自的**经验回放**合在一起，**离线**训练一个整合模型（这一步不用机器人）
+- 真机训练总共约 **5 小时**；整合模型直接拿去测试，不再在新物体上微调
+原: [p.2] In this work, we propose that while dynamic properties of diverse objects remain unknown for exploration, a combination of two primitive shapes makes up the bulk of daily objects.
+讲: 能"合并经验回放再离线训练"，靠的正是 SAC 是 off-policy 算法：它可以从任何存下来的经验里学习，不要求这些经验是当前策略产生的。如果换成 PPO 这类 on-policy 算法，就不能这样直接复用两批旧数据。
+评: "长方体 + 圆柱覆盖大部分日常物体"是作者的**假设**，实验上用 12 个测试物体做了支持，但测试物体数量有限。圆柱训练用了长方体两倍多的回合，说明会滚的物体明显更难学。

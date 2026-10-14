@@ -1,0 +1,38 @@
+<h4>交互：Table II 逐个物体对比<span class="badge">数据来自 Table II（p.6）</span></h4>
+<div class="ctrl"><button type="button" data-rs="all" class="on">全部 20 个物体</button><button type="button" data-rs="test">只看测试集 Obj-9～20</button></div>
+<canvas id="resCv" height="260" aria-label="每个物体的成功次数对比"></canvas>
+<pre class="out" id="resOut"></pre>
+<div class="note">蓝色是本文方法，灰色是启发式基线；每个物体做 5 次。把鼠标移到柱子上看具体次数。</div>
+<script>
+(function(){
+  const {$, $$, css, fit, onRedraw} = R;
+  const ours = [5,5,5,5,5,5,4,5, 5,5,5,5,4,5,4,5,3,5,3,5];
+  const heur = [5,5,0,0,5,5,5,0, 5,0,5,5,5,5,1,2,2,0,1,2];
+  const NOTE = {14: '（甜椒：作者点名的复杂形状）', 17: '（马克杯，见 Fig.7）', 18: '（从 Fig.5 看：大圆筒旁边放着一瓶水）', 19: '（放在瓦楞纸上推）'};
+  let set = 'all', hover = -1; const c = $('#resCv');
+  const idx = () => set === 'all' ? [...Array(20).keys()] : [...Array(12).keys()].map(i => i + 8);
+  function draw(){
+    const {x, w, h} = fit(c); const I = idx();
+    const left = 26, bottom = h - 36, top = 14, gw = (w - left - 8) / I.length, bw = Math.max(3, gw * 0.36);
+    x.font = '11px ui-monospace,Menlo,monospace'; x.fillStyle = css('--ink2'); x.strokeStyle = css('--line');
+    for (let v = 0; v <= 5; v++) { const y = bottom - v / 5 * (bottom - top); x.beginPath(); x.moveTo(left, y); x.lineTo(w - 6, y); x.stroke(); x.fillText(v, 8, y + 4); }
+    I.forEach((k, n) => {
+      const X = left + n * gw + gw / 2;
+      [[ours[k], css('--s1'), -bw - 1], [heur[k], css('--s6'), 1]].forEach(([v, col, off]) => {
+        const H = v / 5 * (bottom - top); x.fillStyle = col; x.globalAlpha = (hover === -1 || hover === n) ? 1 : 0.45;
+        x.fillRect(X + off, bottom - H, bw, Math.max(1.5, H)); x.globalAlpha = 1;
+      });
+      x.fillStyle = css('--ink2'); x.save(); x.translate(X, bottom + 10); x.rotate(-Math.PI / 4); x.textAlign = 'right'; x.fillText(String(k + 1), 6, 6); x.restore();
+    });
+    if (set === 'all') { const sx = left + 8 * gw; x.setLineDash([4, 4]); x.strokeStyle = css('--ink2'); x.beginPath(); x.moveTo(sx, top); x.lineTo(sx, bottom); x.stroke(); x.setLineDash([]); x.fillStyle = css('--ink2'); x.font = '12px -apple-system,sans-serif'; x.fillText('训练物体 ←', sx - 74, top + 12); x.fillText('→ 测试物体', sx + 6, top + 12); }
+    const sum = a => I.reduce((s, k) => s + a[k], 0), N = I.length * 5;
+    let s = `${set === 'all' ? '全部 20 个物体' : '测试集 12 个新物体'}：本文方法 ${sum(ours)}/${N} = ${(sum(ours) / N * 100).toFixed(0)}%　启发式基线 ${sum(heur)}/${N} = ${(sum(heur) / N * 100).toFixed(0)}%`;
+    if (hover >= 0) { const k = I[hover]; s += `\nObj-${k + 1}：本文 ${ours[k]}/5，基线 ${heur[k]}/5${NOTE[k] || ''}`; }
+    $('#resOut').textContent = s;
+  }
+  function pick(e){ const r = c.getBoundingClientRect(); const I = idx(); const gw = (r.width - 26 - 8) / I.length; const n = Math.floor((e.clientX - r.left - 26) / gw); hover = (n >= 0 && n < I.length) ? n : -1; draw(); }
+  c.addEventListener('pointermove', pick); c.addEventListener('pointerdown', pick); c.addEventListener('pointerleave', () => { hover = -1; draw(); });
+  $$('[data-rs]').forEach(b => b.addEventListener('click', () => { set = b.dataset.rs; hover = -1; $$('[data-rs]').forEach(o => o.classList.toggle('on', o === b)); draw(); }));
+  onRedraw(draw);
+})();
+</script>

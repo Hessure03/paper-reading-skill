@@ -1,0 +1,69 @@
+<h4>交互：48 个触觉读数怎么压成 9 维观测<span class="badge">示意：接触分布为假设，压缩规则来自原文</span></h4>
+<div class="row2">
+  <canvas id="obsCv" height="280" aria-label="4x4 触觉阵列与按列取最大"></canvas>
+  <pre class="out" id="obsOut"></pre>
+</div>
+<div class="ctrl">
+  <label>按压力度 <output id="obsPnO"></output><input type="range" id="obsPn" min="0" max="100" value="55"></label>
+  <label>x 方向切向力 <output id="obsPsO"></output><input type="range" id="obsPs" min="-100" max="100" value="35"></label>
+  <button type="button" id="obsSlip">物体开始打滑</button>
+</div>
+<div class="note">在左图上拖动十字（接触中心）。观察：按列取最大值以后，接触点在列里的上下位置就丢掉了，这是作者为了降低学习难度做的取舍。</div>
+<script>
+(function(){
+  const {$, css, hexA, fit, arrow, onRedraw} = R;
+  const c = $('#obsCv'); let cp = [0.8, 1.6], slip = false; const n = 4;
+  function read(){
+    const Fn = +$('#obsPn').value / 100 * 1.6, Fs = +$('#obsPs').value / 100 * 0.6, sig = 0.6, T = [];
+    let sw = 0; const w = [];
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const v = Math.exp(-((i - cp[0]) ** 2 + (j - cp[1]) ** 2) / (2 * sig * sig)); w.push(v); sw += v; }
+    w.forEach((v, k) => T.push({i: k % n, j: Math.floor(k / n), fz: Fn * v / sw * 2.4, fx: Fs * v / sw * 2.4}));
+    const fnCol = [0, 1, 2, 3].map(i => Math.max(...T.filter(t => t.i === i).map(t => t.fz)));
+    const fxCol = [0, 1, 2, 3].map(i => T.filter(t => t.i === i).reduce((a, t) => Math.abs(t.fx) > Math.abs(a) ? t.fx : a, 0));
+    const mu = slip ? 0.05 + 0.04 * Math.abs(Fs) : 0.004;
+    return {T, fnCol, fxCol, mu};
+  }
+  const layout = (W, H) => { const S = Math.min(W, H) - 40; return {S, ox: (W - S) / 2, oy: 28, cell: S / n}; };
+  function draw(){
+    const {x, w, h} = fit(c); const L = layout(w, h); const {T, fnCol, fxCol, mu} = read();
+    const acc = css('--s1'), fmax = Math.max(0.01, ...T.map(t => t.fz));
+    x.font = '12px -apple-system,sans-serif'; x.fillStyle = css('--ink2');
+    ['第1列', '第2列', '第3列', '第4列'].forEach((s, i) => x.fillText(s, L.ox + i * L.cell + L.cell / 2 - 16, 18));
+    T.forEach(t => {
+      const X = L.ox + t.i * L.cell, Y = L.oy + t.j * L.cell;
+      x.fillStyle = css('--bg'); x.fillRect(X + 5, Y + 5, L.cell - 10, L.cell - 10);
+      x.fillStyle = hexA(acc, 0.08 + 0.85 * t.fz / fmax); x.fillRect(X + 5, Y + 5, L.cell - 10, L.cell - 10);
+      if (Math.abs(t.fx) > 0.003) arrow(x, X + L.cell / 2, Y + L.cell / 2, X + L.cell / 2 + t.fx / 0.6 * L.cell * 0.9, Y + L.cell / 2, t.fz / fmax > 0.55 ? css('--paper') : css('--ink'), 4);
+    });
+    x.setLineDash([4, 4]); x.strokeStyle = css('--s2'); x.lineWidth = 1.5;
+    for (let i = 0; i < n; i++) x.strokeRect(L.ox + i * L.cell + 2, L.oy + 2, L.cell - 4, L.S - 4);
+    x.setLineDash([]); x.lineWidth = 1;
+    const P = [L.ox + (cp[0] + 0.5) * L.cell, L.oy + (cp[1] + 0.5) * L.cell];
+    x.strokeStyle = css('--ink'); x.lineWidth = 2.5; x.beginPath(); x.moveTo(P[0] - 9, P[1]); x.lineTo(P[0] + 9, P[1]); x.moveTo(P[0], P[1] - 9); x.lineTo(P[0], P[1] + 9); x.stroke(); x.lineWidth = 1;
+    if (slip) { x.strokeStyle = css('--s4'); x.beginPath(); for (let k = 0; k < 40; k++) { const xx = P[0] - 30 + k * 1.5, yy = P[1] + 18 + Math.sin(k * 1.7) * 4; k ? x.lineTo(xx, yy) : x.moveTo(xx, yy); } x.stroke(); }
+    $('#obsPnO').textContent = (+$('#obsPn').value / 100 * 1.6).toFixed(2) + ' N';
+    $('#obsPsO').textContent = (+$('#obsPs').value / 100 * 0.6).toFixed(2) + ' N';
+    const f = v => (v >= 0 ? ' ' : '') + v.toFixed(2);
+    $('#obsOut').textContent =
+`原始读数：16 个触点 × 3 个力 = 48 个数
+
+压缩后的观测 s（9 维）：
+f_n = [${fnCol.map(f).join(', ')}]  N
+      每列最大的法向力（压力）
+f_x = [${fxCol.map(f).join(', ')}]  N
+      每列绝对值最大的 x 方向切向力
+μ_FFT = ${mu.toFixed(3)}${slip ? '   ← 打滑：高频成分变大' : ''}
+
+最大法向力 f_n^max = ${Math.max(...fnCol).toFixed(2)} N
+（奖励里的「力调节」项用的就是它）`;
+  }
+  function ev(e){ const r = c.getBoundingClientRect(); const L = layout(r.width, +c.dataset.h); return [Math.max(-0.4, Math.min(n - 0.6, (e.clientX - r.left - L.ox) / L.cell - 0.5)), Math.max(-0.4, Math.min(n - 0.6, (e.clientY - r.top - L.oy) / L.cell - 0.5))]; }
+  let drag = false;
+  c.addEventListener('pointerdown', e => { drag = true; c.setPointerCapture(e.pointerId); cp = ev(e); draw(); });
+  c.addEventListener('pointermove', e => { if (drag) { cp = ev(e); draw(); } });
+  c.addEventListener('pointerup', () => drag = false);
+  ['#obsPn', '#obsPs'].forEach(id => $(id).addEventListener('input', draw));
+  $('#obsSlip').addEventListener('click', e => { slip = !slip; e.target.classList.toggle('on', slip); draw(); });
+  onRedraw(draw);
+})();
+</script>
