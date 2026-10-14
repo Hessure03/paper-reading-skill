@@ -24,6 +24,12 @@ import urllib.parse
 import webbrowser
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", line_buffering=True)
+    except Exception:  # noqa: BLE001
+        pass
+
 TOOLS = os.path.dirname(os.path.abspath(__file__))
 SYS = os.path.dirname(TOOLS)
 ROOT = os.path.dirname(SYS)

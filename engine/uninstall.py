@@ -10,6 +10,12 @@ import shutil
 import subprocess
 import sys
 
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", line_buffering=True)
+    except Exception:  # noqa: BLE001
+        pass
+
 ENGINE = os.path.dirname(os.path.abspath(__file__))
 HOME = os.path.expanduser("~")
 SYSTEM = platform.system()

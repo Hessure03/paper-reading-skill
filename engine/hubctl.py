@@ -15,6 +15,12 @@ import time
 import urllib.request
 import webbrowser
 
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", line_buffering=True)
+    except Exception:  # noqa: BLE001
+        pass
+
 ENGINE = os.path.dirname(os.path.abspath(__file__))
 SETTINGS = json.load(open(os.path.join(ENGINE, "settings.json"), encoding="utf-8"))
 PORT = SETTINGS.get("port", 8614)
